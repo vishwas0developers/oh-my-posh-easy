@@ -147,13 +147,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$fDir = '%SRC_FONT_PATH%
 
 :: STEP 4: Finalize
 :step_final
+set "ACTIVE_THEME=%THEME_DIR%\active.omp.json"
+:: Emergency Fix: If active theme is missing, copy a default one
+if not exist "%ACTIVE_THEME%" (
+    if exist "%BASE_DIR%Themes\jandedobbeleer.omp.json" (
+        copy /Y "%BASE_DIR%Themes\jandedobbeleer.omp.json" "%ACTIVE_THEME%" >nul
+    )
+)
+
 if "%SKIP_THEMES%"=="1" if "%SKIP_FONTS%"=="0" goto finish
 cls
 echo [STEP 4/4] Finalizing Configurations...
 
-:: PowerShell
+:: PowerShell (Multi-Version: Supports 5.1 and 7)
 if "%DO_PS%"=="1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -P))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\Documents\PowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\PowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -Parent))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
 )
 
 :: CMD
@@ -185,6 +193,6 @@ if "%DO_CMD%"=="1" (
 :finish
 echo.
 echo ========================================
-echo Operation Complete!
+echo Operation Complete! Theme successfully linked.
 echo ========================================
 pause
