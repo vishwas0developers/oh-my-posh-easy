@@ -4,16 +4,18 @@ setlocal EnableDelayedExpansion
 :: Set encoding to UTF-8
 chcp 65001 >nul
 
-:: Elevation Check
+:: ========================================
+:: AUTO-ELEVATION (Request Admin Privileges)
+:: ========================================
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERROR] Please run this script as Administrator.
-    pause
-    exit /b 1
+    echo [INFO] Requesting Administrator privileges...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%0' -Verb RunAs"
+    exit /b
 )
 
 echo ========================================
-echo Oh My Posh - Ultimate Setup Wizard
+echo Oh My Posh - Smart Setup ^& Auto-Updater
 echo ========================================
 echo.
 
@@ -23,7 +25,7 @@ set "THEME_DIR=C:\Terminal Theme"
 set "SYSTEM_THEMES=%THEME_DIR%\Themes"
 set "SYSTEM_FONTS=%THEME_DIR%\Fonts"
 
-:: Step 0: Asset Discovery & Automated Download (Pure PowerShell)
+:: Step 0: Asset Discovery ^& Automated Download
 set "has_assets=0"
 if exist "%BASE_DIR%Themes" if exist "%BASE_DIR%Fonts" (
     for /f %%i in ('dir /b "%BASE_DIR%Themes\*.json" 2^>nul') do set "has_assets=1"
@@ -72,9 +74,27 @@ if "%CHOICE_SHELL%"=="2" ( set "DO_PS=1" )
 if "%CHOICE_SHELL%"=="3" ( set "DO_CMD=1" )
 if "%DO_PS%"=="0" if "%DO_CMD%"=="0" goto menu_shell
 
-echo Checking Apps...
-oh-my-posh --version >nul 2>&1 || winget install JanDeDobbeleer.OhMyPosh --accept-package-agreements --accept-source-agreements
-if "%DO_CMD%"=="1" ( clink --version >nul 2>&1 || winget install chrisant996.clink --accept-package-agreements --accept-source-agreements )
+:: Smart Winget Update/Install Logic
+echo [1/4] Checking for App Updates...
+oh-my-posh --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing Oh My Posh...
+    winget install JanDeDobbeleer.OhMyPosh --accept-package-agreements --accept-source-agreements
+) else (
+    echo Checking for Oh My Posh updates...
+    winget upgrade JanDeDobbeleer.OhMyPosh --accept-package-agreements --accept-source-agreements >nul 2>&1
+)
+
+if "%DO_CMD%"=="0" goto skip_clink_update
+clink --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing Clink...
+    winget install chrisant996.clink --accept-package-agreements --accept-source-agreements
+) else (
+    echo Checking for Clink updates...
+    winget upgrade chrisant996.clink --accept-package-agreements --accept-source-agreements >nul 2>&1
+)
+:skip_clink_update
 
 :: STEP 2: Dynamic Theme Selection
 :menu_theme
@@ -115,39 +135,43 @@ set "SEL_FONT_DIR=!font_%F_SEL%!"
 echo Installing %SEL_FONT_DIR% variations...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$fDir = Join-Path '%SYSTEM_FONTS%' '%SEL_FONT_DIR%'; $fonts = Get-ChildItem -Path $fDir -Filter *.ttf -Recurse; $fontFolder = [System.Environment]::GetFolderPath('Fonts'); foreach($font in $fonts) { $target = Join-Path $fontFolder $font.Name; if (-not (Test-Path $target)) { Copy-Item $font.FullName $target; $keyPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'; $valueName = $font.BaseName + ' (TrueType)'; Set-ItemProperty -Path $keyPath -Name $valueName -Value $font.Name -Force } }"
 
-:: STEP 4: Finalize Banners
+:: STEP 4: Finalize
 :step_final
 cls
 echo [STEP 4/4] Finalizing Configurations...
 
-:: PowerShell Profile Cleanup & Hidden Banner
-if "%DO_PS%"=="0" goto skip_ps
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -Parent))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
-:skip_ps
-
-:: CMD Wrapper
-if "%DO_CMD%"=="1" goto do_cmd
-goto finish
-
-:do_cmd
-set "CMD_INIT=%THEME_DIR%\init_cmd.bat"
-(echo @echo off & echo cls & echo if exist "%%ProgramFiles(x86)%%\clink\clink.bat" ^(call "%%ProgramFiles(x86)%%\clink\clink.bat" inject --quiet --autorun^) else if exist "%%ProgramFiles%%\clink\clink.bat" ^(call "%%ProgramFiles%%\clink\clink.bat" inject --quiet --autorun^)) > "%CMD_INIT%"
-reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "\"%CMD_INIT%\"" /f >nul 2>&1
-
-:: Safer Clink Check (Avoid Nested Parens)
-if exist "%ProgramFiles(x86)%\clink\clink.bat" set "CLINK_EXE=%ProgramFiles(x86)%\clink\clink.bat"
-if exist "%ProgramFiles%\clink\clink.bat" set "CLINK_EXE=%ProgramFiles%\clink\clink.bat"
-
-if defined CLINK_EXE (
-    call "%CLINK_EXE%" set clink.logo none >nul 2>&1
-    call "%CLINK_EXE%" set clink.autoupdate off >nul 2>&1
+:: PowerShell
+if "%DO_PS%"=="1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -Parent))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
 )
 
-set "CLINK_LUA=%LOCALAPPDATA%\clink"
-if not exist "!CLINK_LUA!" mkdir "!CLINK_LUA!"
-echo oh-my-posh init cmd --config "%ACTIVE_THEME%" > "!CLINK_LUA!\oh-my-posh.lua" 2>nul
+:: CMD (Improved Path Handling for Spaces)
+if "%DO_CMD%"=="1" (
+    set "CMD_INIT=%THEME_DIR%\init_cmd.bat"
+    echo @echo off > "!CMD_INIT!"
+    echo cls >> "!CMD_INIT!"
+    echo if exist "%%ProgramFiles(x86)%%\clink\clink.bat" ( >> "!CMD_INIT!"
+    echo     call "%%ProgramFiles(x86)%%\clink\clink.bat" inject --quiet --autorun >> "!CMD_INIT!"
+    echo ) else if exist "%%ProgramFiles%%\clink\clink.bat" ( >> "!CMD_INIT!"
+    echo     call "%%ProgramFiles%%\clink\clink.bat" inject --quiet --autorun >> "!CMD_INIT!"
+    echo ) >> "!CMD_INIT!"
 
-:finish
+    :: Robust AutoRun Registry Entry
+    reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "if exist \"!CMD_INIT!\" call \"!CMD_INIT!\"" /f >nul 2>&1
+
+    set "CLINK_EXE="
+    if exist "%ProgramFiles(x86)%\clink\clink.bat" set "CLINK_EXE=%ProgramFiles(x86)%\clink\clink.bat"
+    if exist "%ProgramFiles%\clink\clink.bat" set "CLINK_EXE=%ProgramFiles%\clink\clink.bat"
+    if defined CLINK_EXE (
+        call "%CLINK_EXE%" set clink.logo none >nul 2>&1
+        call "%CLINK_EXE%" set clink.autoupdate off >nul 2>&1
+    )
+
+    set "CLINK_LUA=%LOCALAPPDATA%\clink"
+    if not exist "!CLINK_LUA!" mkdir "!CLINK_LUA!"
+    echo oh-my-posh init cmd --config "%ACTIVE_THEME%" > "!CLINK_LUA!\oh-my-posh.lua" 2>nul
+)
+
 echo.
 echo ========================================
 echo Setup Complete!
