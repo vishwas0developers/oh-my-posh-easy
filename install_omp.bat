@@ -168,26 +168,27 @@ if "%DO_PS%"=="1" (
 if "%DO_CMD%"=="1" (
     set "CMD_INIT=%THEME_DIR%\init_cmd.bat"
     echo @echo off > "!CMD_INIT!"
+    echo clink set clink.logo none ^>nul 2^>^&1 >> "!CMD_INIT!"
+    echo clink set clink.autoupdate off ^>nul 2^>^&1 >> "!CMD_INIT!"
     echo cls >> "!CMD_INIT!"
-    echo if exist "%%ProgramFiles(x86)%%\clink\clink.bat" ( >> "!CMD_INIT!"
-    echo     call "%%ProgramFiles(x86)%%\clink\clink.bat" inject --quiet --autorun >> "!CMD_INIT!"
-    echo ) else if exist "%%ProgramFiles%%\clink\clink.bat" ( >> "!CMD_INIT!"
-    echo     call "%%ProgramFiles%%\clink\clink.bat" inject --quiet --autorun >> "!CMD_INIT!"
-    echo ) >> "!CMD_INIT!"
 
-    reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "if exist \"!CMD_INIT!\" call \"!CMD_INIT!\"" /f >nul 2>&1
-
-    set "CLINK_EXE="
-    if exist "%ProgramFiles(x86)%\clink\clink.bat" set "CLINK_EXE=%ProgramFiles(x86)%\clink\clink.bat"
-    if exist "%ProgramFiles%\clink\clink.bat" set "CLINK_EXE=%ProgramFiles%\clink\clink.bat"
-    if defined CLINK_EXE (
-        call "%CLINK_EXE%" set clink.logo none >nul 2>&1
-        call "%CLINK_EXE%" set clink.autoupdate off >nul 2>&1
-    )
-
+    :: Let Clink handle its own normal AutoRun and just inject our cleaner scripts
+    :: First, ensure clink autorun is enabled by Clink installer, but add our quiet wrapper alongside it if we need to
+    
+    :: Instead of overriding clink's autorun, append our initialization script to Oh My Posh's Lua directory!
+    :: Actually, writing clink settings directly via PowerShell is safest during install so it is initialized once:
     set "CLINK_LUA_DIR=%LOCALAPPDATA%\clink"
     if not exist "!CLINK_LUA_DIR!" mkdir "!CLINK_LUA_DIR!"
+    
+    :: Fix Clink settings file directly
+    set "CLINK_SET_FILE=!CLINK_LUA_DIR!\clink_settings"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Test-Path \"!CLINK_SET_FILE!\")) { New-Item -Path \"!CLINK_SET_FILE!\" -ItemType File -Force | Out-Null }; $c = Get-Content \"!CLINK_SET_FILE!\" -Raw; if ($c -notmatch 'clink.logo = none') { Add-Content \"!CLINK_SET_FILE!\" -Value \"`nclink.logo = none\" }; if ($c -notmatch 'clink.autoupdate = False') { Add-Content \"!CLINK_SET_FILE!\" -Value \"`nclink.autoupdate = False\" }"
+    
+    :: Configure Oh My Posh in Clink
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$luaPath = Join-Path $env:LOCALAPPDATA 'clink\oh-my-posh.lua'; $themePath = '%ACTIVE_THEME%'.Replace('\', '\\'); $content = 'oh-my-posh init cmd --config \"' + $themePath + '\"'; [System.IO.File]::WriteAllText($luaPath, $content)"
+    
+    :: Override AutoRun to clear standard banner AND inject clink silently to guarantee it loads without mess
+    reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "if exist \"!CMD_INIT!\" call \"!CMD_INIT!\" & clink inject --quiet >nul 2>&1" /f >nul 2>&1
 )
 
 :finish
