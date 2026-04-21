@@ -22,7 +22,6 @@ echo.
 :: Global Paths
 set "BASE_DIR=%~dp0"
 set "THEME_DIR=C:\Terminal Theme"
-:: In this version, THEME_DIR will only contain THE active.omp.json file.
 
 :: Step 0: Asset Discovery ^& Automated Download
 set "has_assets=0"
@@ -37,8 +36,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 "$themes = @('jandedobbeleer', 'paradox', 'agnoster', 'amro', 'half-life', 'bubbles', 'cert', 'clean-detailed', 'spaceship', 'powerlevel10k_classic'); " ^
 "$fonts = @('Meslo', 'CascadiaCode', 'JetBrainsMono', 'FiraCode', 'Hack', 'SourceCodePro', 'Ubuntu', 'Agave', 'AnonymousPro'); " ^
 "New-Item -ItemType Directory -Force -Path 'Themes', 'Fonts' | Out-Null; " ^
-"foreach($t in $themes) { $url = \"https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/$t.omp.json\"; $dest = \"Themes/$t.omp.json\"; if (!(Test-Path $dest)) { Invoke-WebRequest -Uri $url -OutFile $dest } }; " ^
-"foreach($f in $fonts) { $fDir = \"Fonts/$f\"; if (!(Test-Path $fDir)) { $zip = \"$f.zip\"; $url = \"https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/$zip\"; Invoke-WebRequest -Uri $url -OutFile $zip; Expand-Archive -Path $zip -DestinationPath $fDir -Force; Remove-Item $zip; " ^
+"Write-Host '--- Downloading/Refreshing Themes ---' -ForegroundColor Cyan; " ^
+"foreach($t in $themes) { $url = \"https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/$t.omp.json\"; $dest = \"Themes/$t.omp.json\"; Write-Host \"  Fetching theme: $t\"; Invoke-WebRequest -Uri $url -OutFile $dest }; " ^
+"Write-Host '--- Collecting ^& Pruning 9 Font Families ---' -ForegroundColor Cyan; " ^
+"foreach($f in $fonts) { $fDir = \"Fonts/$f\"; if (!(Test-Path $fDir)) { Write-Host \"  Processing Font: $f\"; $zip = \"$f.zip\"; $url = \"https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/$zip\"; Invoke-WebRequest -Uri $url -OutFile $zip; New-Item -ItemType Directory -Force -Path $fDir | Out-Null; Expand-Archive -Path $zip -DestinationPath $fDir -Force; Remove-Item $zip; " ^
 "  $files = Get-ChildItem -Path $fDir -Include *.ttf, *.otf -Recurse; " ^
 "  $exclude = @('Propo', 'Windows Compatible', 'Thin', 'ExtraLight', 'Light', 'SemiBold', 'SemiLight', 'Condensed'); " ^
 "  $keep = $files | Where-Object { ($_.Name -like '*Mono*') -and ($_.Name -match 'Regular|Bold|Italic') -and ($_.Name -notmatch ($exclude -join '|')) }; " ^
@@ -47,25 +48,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 :skip_download
 
-:: Ensure Deployment Directory Exists
 if not exist "%THEME_DIR%" mkdir "%THEME_DIR%"
 
-:: STEP 1: Shell Selection
+:: STEP 1: Main Menu
 :menu_shell
 cls
-echo [STEP 1/4] Select Shell Configuration:
+echo [STEP 1/4] Select Configuration Option:
 echo [1] PowerShell + CMD (Full Installation)
 echo [2] Only PowerShell
 echo [3] Only CMD
+echo [4] Change Theme Only
+echo [5] Install Fonts Only
 echo.
-set /p "CHOICE_SHELL=Enter choice (1-3): "
+set /p "CHOICE_MAIN=Enter choice (1-5): "
 
 set "DO_PS=0"
 set "DO_CMD=0"
-if "%CHOICE_SHELL%"=="1" ( set "DO_PS=1" & set "DO_CMD=1" )
-if "%CHOICE_SHELL%"=="2" ( set "DO_PS=1" )
-if "%CHOICE_SHELL%"=="3" ( set "DO_CMD=1" )
-if "%DO_PS%"=="0" if "%DO_CMD%"=="0" goto menu_shell
+set "SKIP_APPS=0"
+set "SKIP_THEMES=0"
+set "SKIP_FONTS=0"
+
+if "%CHOICE_MAIN%"=="1" ( set "DO_PS=1" & set "DO_CMD=1" )
+if "%CHOICE_MAIN%"=="2" ( set "DO_PS=1" )
+if "%CHOICE_MAIN%"=="3" ( set "DO_CMD=1" )
+if "%CHOICE_MAIN%"=="4" ( set "DO_PS=1" & set "DO_CMD=1" & set "SKIP_APPS=1" & set "SKIP_FONTS=1" )
+if "%CHOICE_MAIN%"=="5" ( set "SKIP_APPS=1" & set "SKIP_THEMES=1" )
+
+if "%DO_PS%"=="0" if "%DO_CMD%"=="0" if "%SKIP_APPS%"=="0" goto menu_shell
+
+if "%SKIP_APPS%"=="1" goto menu_theme
 
 :: Smart Winget Update/Install Logic
 echo [1/4] Checking for App Updates...
@@ -89,13 +100,13 @@ if %errorlevel% neq 0 (
 )
 :skip_clink_update
 
-:: STEP 2: Dynamic Theme Selection (FROM SOURCE FOLDER)
+:: STEP 2: Dynamic Theme Selection
 :menu_theme
+if "%SKIP_THEMES%"=="1" goto menu_font
 cls
 echo [STEP 2/4] Choose your Terminal Theme:
 echo.
 set "t_count=0"
-:: Scan themes from the SOURCE directory (D: drive)
 for %%f in ("%BASE_DIR%Themes\*.json") do (
     set /a "t_count+=1"
     set "theme_!t_count!=%%~nxf"
@@ -108,13 +119,12 @@ if not defined theme_%T_SEL% goto menu_theme
 set "SEL_THEME_FILE=!theme_%T_SEL%!"
 set "ACTIVE_THEME=%THEME_DIR%\active.omp.json"
 
-:: SINGLE THEME POLICY: Clear destination folder before copying
 if exist "%THEME_DIR%\*.json" del /Q /F "%THEME_DIR%\*.json" >nul 2>&1
-echo Deploying selected theme to C: partition...
 copy /Y "%BASE_DIR%Themes\%SEL_THEME_FILE%" "%ACTIVE_THEME%" >nul
 
 :: STEP 3: Dynamic Font Family Selection
 :menu_font
+if "%SKIP_FONTS%"=="1" goto step_final
 cls
 echo [STEP 3/4] Choose a Font Family to Install:
 echo.
@@ -137,6 +147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$fDir = '%SRC_FONT_PATH%
 
 :: STEP 4: Finalize
 :step_final
+if "%SKIP_THEMES%"=="1" if "%SKIP_FONTS%"=="0" goto finish
 cls
 echo [STEP 4/4] Finalizing Configurations...
 
@@ -145,7 +156,7 @@ if "%DO_PS%"=="1" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -P))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
 )
 
-:: CMD (Improved Path Handling for Spaces and Lua Escaping)
+:: CMD
 if "%DO_CMD%"=="1" (
     set "CMD_INIT=%THEME_DIR%\init_cmd.bat"
     echo @echo off > "!CMD_INIT!"
@@ -168,14 +179,12 @@ if "%DO_CMD%"=="1" (
 
     set "CLINK_LUA_DIR=%LOCALAPPDATA%\clink"
     if not exist "!CLINK_LUA_DIR!" mkdir "!CLINK_LUA_DIR!"
-    :: Use robust PowerShell method to write Lua config with escaped paths to prevent PARSE ERROR
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$luaPath = Join-Path $env:LOCALAPPDATA 'clink\oh-my-posh.lua'; $themePath = '%ACTIVE_THEME%'.Replace('\', '\\'); $content = 'oh-my-posh init cmd --config \"' + $themePath + '\"'; [System.IO.File]::WriteAllText($luaPath, $content)"
 )
 
+:finish
 echo.
 echo ========================================
-echo Setup Complete! 
-echo Current Theme: %SEL_THEME_FILE%
-echo Folder: %THEME_DIR% (Always Clean)
+echo Operation Complete!
 echo ========================================
 pause
