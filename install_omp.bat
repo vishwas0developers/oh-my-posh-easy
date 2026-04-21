@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 :: Set encoding to UTF-8
 chcp 65001 >nul
 
-:: Elevation Check (Font install requires it)
+:: Elevation Check
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Please run this script as Administrator.
@@ -13,172 +13,131 @@ if %errorlevel% neq 0 (
 )
 
 echo ========================================
-echo Oh My Posh - Dynamic Setup Wizard
+echo Oh My Posh - Ultimate Setup Wizard (No-Script Mode)
 echo ========================================
 echo.
 
-:: Define Global Paths
+:: Global Paths
 set "BASE_DIR=%~dp0"
 set "THEME_DIR=C:\Terminal Theme"
-set "THEMES_STORAGE=%THEME_DIR%\Themes"
+set "SYSTEM_THEMES=%THEME_DIR%\Themes"
+set "SYSTEM_FONTS=%THEME_DIR%\Fonts"
 
-:: Step 0: Ensure Directory Structure
-if not exist "%THEME_DIR%" mkdir "%THEME_DIR%"
-if not exist "%THEMES_STORAGE%" mkdir "%THEMES_STORAGE%"
-
-:: Sync Local Themes to System Directory
-if exist "%BASE_DIR%Themes" (
-    echo Syncing local themes to %THEMES_STORAGE%...
-    xcopy /Y /Q /E "%BASE_DIR%Themes\*" "%THEMES_STORAGE%\" >nul
+:: Step 0: Asset Discovery & Automated Download (Pure PowerShell)
+set "has_assets=0"
+if exist "%BASE_DIR%Themes" if exist "%BASE_DIR%Fonts" (
+    for /f %%i in ('dir /b "%BASE_DIR%Themes\*.json" 2^>nul') do set "has_assets=1"
 )
 
+if "%has_assets%"=="0" (
+    echo [INFO] Assets missing. Initializing automated download...
+    
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$themes = @('jandedobbeleer', 'paradox', 'agnoster', 'amro', 'half-life', 'bubbles', 'cert', 'clean-detailed', 'spaceship', 'powerlevel10k_classic'); " ^
+    "$fonts = @('Meslo', 'CascadiaCode', 'JetBrainsMono', 'FiraCode', 'Hack', 'SourceCodePro', 'Ubuntu', 'Agave', 'AnonymousPro'); " ^
+    "New-Item -ItemType Directory -Force -Path 'Themes', 'Fonts' | Out-Null; " ^
+    "Write-Host '--- Collecting Top 10 Themes ---' -ForegroundColor Cyan; " ^
+    "foreach($t in $themes) { $url = \"https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/$t.omp.json\"; $dest = \"Themes/$t.omp.json\"; if (!(Test-Path $dest)) { Write-Host \"  Downloading theme: $t\"; Invoke-WebRequest -Uri $url -OutFile $dest } }; " ^
+    "Write-Host '--- Collecting & Pruning 9 Font Families ---' -ForegroundColor Cyan; " ^
+    "foreach($f in $fonts) { $fDir = \"Fonts/$f\"; if (!(Test-Path $fDir)) { Write-Host \"  Processing Font: $f\"; $zip = \"$f.zip\"; $url = \"https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/$zip\"; Invoke-WebRequest -Uri $url -OutFile $zip; New-Item -ItemType Directory -Force -Path $fDir | Out-Null; Expand-Archive -Path $zip -DestinationPath $fDir -Force; Remove-Item $zip; " ^
+    "  $files = Get-ChildItem -Path $fDir -Include *.ttf, *.otf -Recurse; " ^
+    "  $exclude = @('Propo', 'Windows Compatible', 'Thin', 'ExtraLight', 'Light', 'SemiBold', 'SemiLight', 'Condensed'); " ^
+    "  $keep = $files | Where-Object { ($_.Name -like '*Mono*') -and ($_.Name -match 'Regular|Bold|Italic') -and ($_.Name -notmatch ($exclude -join '|')) }; " ^
+    "  if ($keep.Count -lt 4) { $keep += ($files | Where-Object { ($_.Name -match 'Regular|Bold|Italic') -and ($_.Name -notmatch ($exclude -join '|')) -and ($keep -notcontains $_) }) }; " ^
+    "  $toDelete = $files | Where-Object { $keep -notcontains $_ }; " ^
+    "  foreach($d in $toDelete) { Remove-Item $d.FullName -Force }; Write-Host \"  Pruned $f: Kept $($keep.Count) essential fonts.\" } }; "
+)
+
+:: Sync to C:\Terminal Theme
+if not exist "%THEME_DIR%" mkdir "%THEME_DIR%"
+if not exist "%SYSTEM_THEMES%" mkdir "%SYSTEM_THEMES%"
+if not exist "%SYSTEM_FONTS%" mkdir "%SYSTEM_FONTS%"
+
+echo Syncing assets to system storage...
+xcopy /Y /Q /E "%BASE_DIR%Themes\*" "%SYSTEM_THEMES%\" >nul 2>&1
+xcopy /Y /Q /E "%BASE_DIR%Fonts\*" "%SYSTEM_FONTS%\" >nul 2>&1
+
+:: STEP 1: Shell Selection
 :menu_shell
-echo [STEP 1/3] Select Shell Configuration:
+cls
+echo [STEP 1/4] Select Shell Configuration:
 echo [1] PowerShell + CMD (Full Installation)
 echo [2] Only PowerShell
 echo [3] Only CMD
 echo.
 set /p "CHOICE_SHELL=Enter choice (1-3): "
 
-if "%CHOICE_SHELL%"=="" set "CHOICE_SHELL=1"
-if "%CHOICE_SHELL%"=="1" ( set "DO_PS=1" & set "DO_CMD=1" ) else if "%CHOICE_SHELL%"=="2" ( set "DO_PS=1" & set "DO_CMD=0" ) else if "%CHOICE_SHELL%"=="3" ( set "DO_PS=0" & set "DO_CMD=1" ) else ( echo Invalid choice. & goto menu_shell )
+if "%CHOICE_SHELL%"=="1" ( set "DO_PS=1" & set "DO_CMD=1" ) else if "%CHOICE_SHELL%"=="2" ( set "DO_PS=1" & set "DO_CMD=0" ) else if "%CHOICE_SHELL%"=="3" ( set "DO_PS=0" & set "DO_CMD=1" ) else ( goto menu_shell )
 
-:: 1. Core Apps Installation
+echo Checking Apps...
+oh-my-posh --version >nul 2>&1 || winget install JanDeDobbeleer.OhMyPosh --accept-package-agreements --accept-source-agreements
+if "%DO_CMD%"=="1" ( clink --version >nul 2>&1 || winget install chrisant996.clink --accept-package-agreements --accept-source-agreements )
+
+:: STEP 2: Dynamic Theme Selection
+:menu_theme
 cls
-echo [1/3] Checking Core Dependencies...
-oh-my-posh --version >nul 2>&1
-if !errorlevel! neq 0 (
-    echo Installing Oh My Posh via winget...
-    winget install JanDeDobbeleer.OhMyPosh --accept-package-agreements --accept-source-agreements
-    timeout /t 3 /nobreak >nul
-)
-
-if "%DO_CMD%"=="1" (
-    clink --version >nul 2>&1
-    if !errorlevel! neq 0 (
-        echo Installing Clink via winget...
-        winget install chrisant996.clink --accept-package-agreements --accept-source-agreements
-    )
-)
-
-:: Step 2: Dynamic Theme Selection
-cls
-echo [STEP 2/3] Choose your Terminal Theme:
+echo [STEP 2/4] Choose your Terminal Theme:
 echo.
-
-:: Build Dynamic Menu from C:\Terminal Theme\Themes
-set "count=0"
-for %%f in ("%THEMES_STORAGE%\*.json") do (
-    set /a "count+=1"
-    set "theme_!count!=%%~nxf"
-    echo [!count!] %%~nf
+set "t_count=0"
+for %%f in ("%SYSTEM_THEMES%\*.json") do (
+    set /a "t_count+=1"
+    set "theme_!t_count!=%%~nxf"
+    echo [!t_count!] %%~nf
 )
-
-if %count% equ 0 (
-    echo [WARNING] No themes found in %THEMES_STORAGE%. 
-    echo Please ensure the "Themes" folder contains .json files.
-    pause
-    goto finish_setup
-)
-
 echo.
-set /p "CHOICE_THEME=Select theme number (1-%count%): "
-
-if not defined theme_%CHOICE_THEME% (
-    echo Invalid selection.
-    pause
-    goto start_install
-)
-
-set "SELECTED_THEME_FILE=!theme_%CHOICE_THEME%!"
+set /p "T_SEL=Select theme (1-%t_count%): "
+if not defined theme_%T_SEL% goto menu_theme
+set "SEL_THEME_FILE=!theme_%T_SEL%!"
 set "ACTIVE_THEME=%THEME_DIR%\active.omp.json"
-copy /Y "%THEMES_STORAGE%\%SELECTED_THEME_FILE%" "%ACTIVE_THEME%" >nul
-echo Theme "!SELECTED_THEME_FILE!" activated.
+copy /Y "%SYSTEM_THEMES%\%SEL_THEME_FILE%" "%ACTIVE_THEME%" >nul
 
-:: Step 3: Font Installation Prompt
+:: STEP 3: Dynamic Font Family Selection
+:menu_font
 cls
-echo [STEP 3/3] Font Installation:
+echo [STEP 3/4] Choose a Font Family to Install:
 echo.
-set /p "INSTALL_FONT=Do you want to install the JetBrainsMono Nerd Font? (Y/N): "
-
-if /i "%INSTALL_FONT%"=="Y" (
-    if exist "%BASE_DIR%JetBrainsMono.zip" (
-        echo Extracting and Installing Fonts...
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "Write-Host 'Extracting Zip...'; $tempPath = Join-Path $env:TEMP 'OMP_Fonts'; if (Test-Path $tempPath) { Remove-Item $tempPath -Recurse -Force }; New-Item -Path $tempPath -ItemType Directory | Out-Null; Expand-Archive -Path '%BASE_DIR%JetBrainsMono.zip' -DestinationPath $tempPath -Force; $fonts = Get-ChildItem -Path $tempPath -Filter *.ttf -Recurse; $fontFolder = [System.Environment]::GetFolderPath('Fonts'); foreach($font in $fonts) { $target = Join-Path $fontFolder $font.Name; if (-not (Test-Path $target)) { Copy-Item $font.FullName $target; $keyPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'; $valueName = $font.BaseName + ' (TrueType)'; Set-ItemProperty -Path $keyPath -Name $valueName -Value $font.Name -Force; Write-Host 'Installed: ' $font.Name } else { Write-Host 'Already exists: ' $font.Name } }; Remove-Item $tempPath -Recurse -Force; Write-Host 'Font installation completed!'"
-    ) else (
-        echo [ERROR] JetBrainsMono.zip not found in %BASE_DIR%
-        pause
-    )
+set "f_count=0"
+echo [0] Skip Font Installation
+for /d %%d in ("%SYSTEM_FONTS%\*") do (
+    set /a "f_count+=1"
+    set "font_!f_count!=%%~nxd"
+    echo [!f_count!] %%~nxd
 )
+echo.
+set /p "F_SEL=Select font family (0-%f_count%): "
+if "%F_SEL%"=="0" goto step_final
+if not defined font_%F_SEL% goto menu_font
 
-:: Final Configuration: Profile Application
+set "SEL_FONT_DIR=!font_%F_SEL%!"
+echo Installing %SEL_FONT_DIR% variations...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$fDir = Join-Path '%SYSTEM_FONTS%' '%SEL_FONT_DIR%'; $fonts = Get-ChildItem -Path $fDir -Filter *.ttf -Recurse; $fontFolder = [System.Environment]::GetFolderPath('Fonts'); foreach($font in $fonts) { $target = Join-Path $fontFolder $font.Name; if (-not (Test-Path $target)) { Copy-Item $font.FullName $target; $keyPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'; $valueName = $font.BaseName + ' (TrueType)'; Set-ItemProperty -Path $keyPath -Name $valueName -Value $font.Name -Force } }"
+
+:: STEP 4: Finalize Banners
+:step_final
 cls
-echo Applying Shell Configuration...
+echo [STEP 4/4] Finalizing Configurations...
 
-:: 3.1 PowerShell Setup
+:: PowerShell Profile Cleanup & Hidden Banner
 if "%DO_PS%"=="1" (
-    set "TEMP_PS=%TEMP%\omp_setup_%RANDOM%.ps1"
-    echo $themePath = '%ACTIVE_THEME%' > "%TEMP_PS%"
-    echo $initLine = "oh-my-posh init pwsh --config `"$themePath`" | Invoke-Expression" >> "%TEMP_PS%"
-    echo $profiles = @($PROFILE, >> "%TEMP_PS%"
-    echo   "$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1", >> "%TEMP_PS%"
-    echo   "$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1") >> "%TEMP_PS%"
-    echo foreach ($p in $profiles) { >> "%TEMP_PS%"
-    echo     if ($p -and (Test-Path (Split-Path $p -Parent))) { >> "%TEMP_PS%"
-    echo         $dir = Split-Path $p >> "%TEMP_PS%"
-    echo         if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force ^| Out-Null } >> "%TEMP_PS%"
-    echo         if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force ^| Out-Null } >> "%TEMP_PS%"
-    echo         $content = Get-Content $p -Raw -ErrorAction SilentlyContinue >> "%TEMP_PS%"
-    echo         $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' >> "%TEMP_PS%"
-    echo         $cleaned = $cleaned -replace '(?m)^.*Clear-Host.*$\r?\n?', '' >> "%TEMP_PS%"
-    echo         Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8 >> "%TEMP_PS%"
-    echo         if (-not [string]::IsNullOrWhiteSpace($initLine)) { Add-Content -Path $p -Value "`r`n$initLine" -Encoding UTF8 } >> "%TEMP_PS%"
-    echo         Add-Content -Path $p -Value "Clear-Host" -Encoding UTF8 >> "%TEMP_PS%"
-    echo         Write-Host "Updated PS Profile: $p" >> "%TEMP_PS%"
-    echo     } >> "%TEMP_PS%"
-    echo } >> "%TEMP_PS%"
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP_PS%"
-    if exist "%TEMP_PS%" del "%TEMP_PS%" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -Parent))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
 )
 
-:: 3.2 CMD/Clink Setup
+:: CMD Wrapper
 if "%DO_CMD%"=="1" (
-    set "CMD_INIT_SCRIPT=%THEME_DIR%\init_cmd.bat"
-    (
-        echo @echo off
-        echo cls
-        echo if exist "%%ProgramFiles(x86)%%\clink\clink.bat" ^(
-        echo     call "%%ProgramFiles(x86)%%\clink\clink.bat" inject --quiet --autorun
-        echo ^) else if exist "%%ProgramFiles%%\clink\clink.bat" ^(
-        echo     call "%%ProgramFiles%%\clink\clink.bat" inject --quiet --autorun
-        echo ^) else if exist "%%LOCALAPPDATA%%\Programs\clink\clink.bat" ^(
-        echo     call "%%LOCALAPPDATA%%\Programs\clink\clink.bat" inject --quiet --autorun
-        echo ^)
-    ) > "%CMD_INIT_SCRIPT%"
-    reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "\"%CMD_INIT_SCRIPT%\"" /f >nul 2>&1
-    
-    :: Disable Clink Banner & AutoUpdate
+    set "CMD_INIT=%THEME_DIR%\init_cmd.bat"
+    (echo @echo off & echo cls & echo if exist "%%ProgramFiles(x86)%%\clink\clink.bat" ^(call "%%ProgramFiles(x86)%%\clink\clink.bat" inject --quiet --autorun^) else if exist "%%ProgramFiles%%\clink\clink.bat" ^(call "%%ProgramFiles%%\clink\clink.bat" inject --quiet --autorun^)) > "%CMD_INIT%"
+    reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "\"%CMD_INIT%\"" /f >nul 2>&1
     if exist "%ProgramFiles(x86)%\clink\clink.bat" (
         call "%ProgramFiles(x86)%\clink\clink.bat" set clink.logo none >nul 2>&1
         call "%ProgramFiles(x86)%\clink\clink.bat" set clink.autoupdate off >nul 2>&1
-    ) else if exist "%ProgramFiles%\clink\clink.bat" (
-        call "%ProgramFiles%\clink\clink.bat" set clink.logo none >nul 2>&1
-        call "%ProgramFiles%\clink\clink.bat" set clink.autoupdate off >nul 2>&1
     )
-    
-    :: Set Clink Lua to use the active theme
-    set "CLINK_DIR=%LOCALAPPDATA%\clink"
-    if not exist "!CLINK_DIR!" mkdir "!CLINK_DIR!"
-    echo oh-my-posh init cmd --config "%ACTIVE_THEME%" > "!CLINK_DIR!\oh-my-posh.lua" 2>nul
-    echo CMD Banner Suppressed and Theme Activated.
+    set "CLINK_LUA=%LOCALAPPDATA%\clink"
+    if not exist "!CLINK_LUA!" mkdir "!CLINK_LUA!"
+    echo oh-my-posh init cmd --config "%ACTIVE_THEME%" > "!CLINK_LUA!\oh-my-posh.lua" 2>nul
 )
 
-:finish_setup
 echo.
 echo ========================================
-echo Setup Complete!
+echo Setup Complete! All Assets Preconfigured.
 echo ========================================
-echo Theme: !SELECTED_THEME_FILE!
-echo Profiles updated. Please RESTART your terminal.
-echo.
 pause
