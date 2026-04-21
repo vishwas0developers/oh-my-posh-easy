@@ -22,8 +22,7 @@ echo.
 :: Global Paths
 set "BASE_DIR=%~dp0"
 set "THEME_DIR=C:\Terminal Theme"
-set "SYSTEM_THEMES=%THEME_DIR%\Themes"
-set "SYSTEM_FONTS=%THEME_DIR%\Fonts"
+:: In this version, THEME_DIR will only contain THE active.omp.json file.
 
 :: Step 0: Asset Discovery ^& Automated Download
 set "has_assets=0"
@@ -48,14 +47,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 :skip_download
 
-:: Sync to C:\Terminal Theme
+:: Ensure Deployment Directory Exists
 if not exist "%THEME_DIR%" mkdir "%THEME_DIR%"
-if not exist "%SYSTEM_THEMES%" mkdir "%SYSTEM_THEMES%"
-if not exist "%SYSTEM_FONTS%" mkdir "%SYSTEM_FONTS%"
-
-echo Syncing assets to system storage...
-xcopy /Y /Q /E "%BASE_DIR%Themes\*" "%SYSTEM_THEMES%\" >nul 2>&1
-xcopy /Y /Q /E "%BASE_DIR%Fonts\*" "%SYSTEM_FONTS%\" >nul 2>&1
 
 :: STEP 1: Shell Selection
 :menu_shell
@@ -96,13 +89,14 @@ if %errorlevel% neq 0 (
 )
 :skip_clink_update
 
-:: STEP 2: Dynamic Theme Selection
+:: STEP 2: Dynamic Theme Selection (FROM SOURCE FOLDER)
 :menu_theme
 cls
 echo [STEP 2/4] Choose your Terminal Theme:
 echo.
 set "t_count=0"
-for %%f in ("%SYSTEM_THEMES%\*.json") do (
+:: Scan themes from the SOURCE directory (D: drive)
+for %%f in ("%BASE_DIR%Themes\*.json") do (
     set /a "t_count+=1"
     set "theme_!t_count!=%%~nxf"
     echo [!t_count!] %%~nf
@@ -110,9 +104,14 @@ for %%f in ("%SYSTEM_THEMES%\*.json") do (
 echo.
 set /p "T_SEL=Select theme (1-%t_count%): "
 if not defined theme_%T_SEL% goto menu_theme
+
 set "SEL_THEME_FILE=!theme_%T_SEL%!"
 set "ACTIVE_THEME=%THEME_DIR%\active.omp.json"
-copy /Y "%SYSTEM_THEMES%\%SEL_THEME_FILE%" "%ACTIVE_THEME%" >nul
+
+:: SINGLE THEME POLICY: Clear destination folder before copying
+if exist "%THEME_DIR%\*.json" del /Q /F "%THEME_DIR%\*.json" >nul 2>&1
+echo Deploying selected theme to C: partition...
+copy /Y "%BASE_DIR%Themes\%SEL_THEME_FILE%" "%ACTIVE_THEME%" >nul
 
 :: STEP 3: Dynamic Font Family Selection
 :menu_font
@@ -121,7 +120,7 @@ echo [STEP 3/4] Choose a Font Family to Install:
 echo.
 set "f_count=0"
 echo [0] Skip Font Installation
-for /d %%d in ("%SYSTEM_FONTS%\*") do (
+for /d %%d in ("%BASE_DIR%Fonts\*") do (
     set /a "f_count+=1"
     set "font_!f_count!=%%~nxd"
     echo [!f_count!] %%~nxd
@@ -132,8 +131,9 @@ if "%F_SEL%"=="0" goto step_final
 if not defined font_%F_SEL% goto menu_font
 
 set "SEL_FONT_DIR=!font_%F_SEL%!"
+set "SRC_FONT_PATH=%BASE_DIR%Fonts\!SEL_FONT_DIR!"
 echo Installing %SEL_FONT_DIR% variations...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$fDir = Join-Path '%SYSTEM_FONTS%' '%SEL_FONT_DIR%'; $fonts = Get-ChildItem -Path $fDir -Filter *.ttf -Recurse; $fontFolder = [System.Environment]::GetFolderPath('Fonts'); foreach($font in $fonts) { $target = Join-Path $fontFolder $font.Name; if (-not (Test-Path $target)) { Copy-Item $font.FullName $target; $keyPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'; $valueName = $font.BaseName + ' (TrueType)'; Set-ItemProperty -Path $keyPath -Name $valueName -Value $font.Name -Force } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$fDir = '%SRC_FONT_PATH%'; $fonts = Get-ChildItem -Path $fDir -Filter *.ttf -Recurse; $fontFolder = [System.Environment]::GetFolderPath('Fonts'); foreach($font in $fonts) { $target = Join-Path $fontFolder $font.Name; if (-not (Test-Path $target)) { Copy-Item $font.FullName $target; $keyPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'; $valueName = $font.BaseName + ' (TrueType)'; Set-ItemProperty -Path $keyPath -Name $valueName -Value $font.Name -Force } }"
 
 :: STEP 4: Finalize
 :step_final
@@ -142,10 +142,10 @@ echo [STEP 4/4] Finalizing Configurations...
 
 :: PowerShell
 if "%DO_PS%"=="1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -Parent))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$themePath = '%ACTIVE_THEME%'; $initLine = 'oh-my-posh init pwsh --config \"' + $themePath + '\" | Invoke-Expression'; $profiles = @($PROFILE, \"$HOME\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\", \"$HOME\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1\"); foreach ($p in $profiles) { if ($p -and (Test-Path (Split-Path $p -P))) { if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force }; $content = Get-Content $p -Raw; $cleaned = $content -replace '(?m)^.*oh-my-posh init.*$\r?\n?', '' -replace '(?m)^.*Clear-Host.*$\r?\n?', ''; Set-Content -Path $p -Value $cleaned.Trim() -Encoding UTF8; Add-Content -Path $p -Value \"`r`n$initLine`r`nClear-Host\" -Encoding UTF8; } }"
 )
 
-:: CMD (Improved Path Handling for Spaces)
+:: CMD (Improved Path Handling for Spaces and Lua Escaping)
 if "%DO_CMD%"=="1" (
     set "CMD_INIT=%THEME_DIR%\init_cmd.bat"
     echo @echo off > "!CMD_INIT!"
@@ -156,7 +156,6 @@ if "%DO_CMD%"=="1" (
     echo     call "%%ProgramFiles%%\clink\clink.bat" inject --quiet --autorun >> "!CMD_INIT!"
     echo ) >> "!CMD_INIT!"
 
-    :: Robust AutoRun Registry Entry
     reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_SZ /d "if exist \"!CMD_INIT!\" call \"!CMD_INIT!\"" /f >nul 2>&1
 
     set "CLINK_EXE="
@@ -167,13 +166,16 @@ if "%DO_CMD%"=="1" (
         call "%CLINK_EXE%" set clink.autoupdate off >nul 2>&1
     )
 
-    set "CLINK_LUA=%LOCALAPPDATA%\clink"
-    if not exist "!CLINK_LUA!" mkdir "!CLINK_LUA!"
-    echo oh-my-posh init cmd --config "%ACTIVE_THEME%" > "!CLINK_LUA!\oh-my-posh.lua" 2>nul
+    set "CLINK_LUA_DIR=%LOCALAPPDATA%\clink"
+    if not exist "!CLINK_LUA_DIR!" mkdir "!CLINK_LUA_DIR!"
+    :: Use robust PowerShell method to write Lua config with escaped paths to prevent PARSE ERROR
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$luaPath = Join-Path $env:LOCALAPPDATA 'clink\oh-my-posh.lua'; $themePath = '%ACTIVE_THEME%'.Replace('\', '\\'); $content = 'oh-my-posh init cmd --config \"' + $themePath + '\"'; [System.IO.File]::WriteAllText($luaPath, $content)"
 )
 
 echo.
 echo ========================================
-echo Setup Complete!
+echo Setup Complete! 
+echo Current Theme: %SEL_THEME_FILE%
+echo Folder: %THEME_DIR% (Always Clean)
 echo ========================================
 pause
